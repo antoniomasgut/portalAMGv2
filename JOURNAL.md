@@ -20,4 +20,15 @@ Aquest document registra les tasques, decisions i canvis realitzats en el projec
 - **GitHub**: S'ha connectat amb el repositori remot `https://github.com/antoniomasgut/portalAMGv2.git` i s'ha realitzat la primera pujada de tot el codi actualitzat.
 
 ---
+### 3. Definició de l'Arquitectura de Contenidors
+S'ha documentat la funció de cadascun dels 7 contenidors del sistema:
+- **portal_caddy**: Reverse Proxy i gestió de SSL/HTTPS.
+- **portal_frontend**: Interfície d'usuari (Next.js).
+- **portal_backend**: Lògica de negoci i API (Express).
+- **portal_db**: Base de dades relacional (PostgreSQL).
+- **portal_ai**: Motor de processament de dades amb IA (FastAPI).
+- **portal_qdrant**: Base de dades vectorial per a RAG (Intel·ligència Artificial).
+- **portal_n8n**: Motor d'automatitzacions i workflows.
+
+---
 *Nota: Aquest document s'anirà actualitzant amb cada intervenció significativa.*
