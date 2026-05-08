@@ -8,6 +8,7 @@ volumes:
   n8n_data:
   caddy_data:
   caddy_config:
+  ollama_data:
 
 services:
 
@@ -42,9 +43,7 @@ services:
   # ── Frontend Next.js ──────────────────────────────────────────────────────
   frontend:
     image: portalamg-frontend:latest
-    build:
-      context: ./frontend
-      dockerfile: ../docker/Dockerfile.frontend
+    user: root
     container_name: portal_frontend
     restart: unless-stopped
     command: sh -c "npm install && npm run dev"
@@ -73,12 +72,10 @@ services:
   # ── Backend Node.js / Express ─────────────────────────────────────────────
   backend:
     image: portalamg-backend:latest
-    build:
-      context: ./backend
-      dockerfile: ../docker/Dockerfile.backend
+    user: root
     container_name: portal_backend
     restart: unless-stopped
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "npm install && npx prisma generate && npx ts-node-dev --respawn --transpile-only src/index.ts"
     volumes:
       - ./backend:/app
       - /app/node_modules
@@ -124,9 +121,6 @@ services:
   # ── IA / RAG (Python / FastAPI) ───────────────────────────────────────────
   ai:
     image: portalamg-ai:latest
-    build:
-      context: ./ai
-      dockerfile: ../docker/Dockerfile.ai
     container_name: portal_ai
     restart: unless-stopped
     expose:
@@ -136,13 +130,13 @@ services:
     environment:
       - IA_PROVIDER_QUALITY=${IA_PROVIDER_QUALITY:-groq}
       - IA_PROVIDER_FAST=${IA_PROVIDER_FAST:-groq}
-      - IA_PROVIDER_LOCAL=${IA_PROVIDER_LOCAL:-none}
+      - IA_PROVIDER_LOCAL=${IA_PROVIDER_LOCAL:-ollama}
       - MODEL_QUALITY=${MODEL_QUALITY:-llama-3.3-70b}
       - MODEL_FAST=${MODEL_FAST:-llama-3.1-8b}
-      - MODEL_LOCAL=${MODEL_LOCAL:-gemma3:4b}
+      - MODEL_LOCAL=${MODEL_LOCAL:-qwen3.6:35b-a3b}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION:-portal_rag}
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
@@ -155,12 +149,26 @@ services:
     depends_on:
       qdrant:
         condition: service_healthy
+      ollama:
+        condition: service_started
     healthcheck:
       test: ["CMD", "true"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # ── Ollama (IA Local) ─────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: portal_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - portal-network
 
   # ── n8n (automatitzacions) ────────────────────────────────────────────────
   n8n:
