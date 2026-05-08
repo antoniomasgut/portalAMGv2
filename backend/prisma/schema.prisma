@@ -1,0 +1,1132 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Usuaris i autenticació ────────────────────────────────────────────
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  role      Role      @default(CLIENT)
+  clientId  String?
+  lastLogin DateTime?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  client    Client?   @relation(fields: [clientId], references: [id])
+
+  @@index([email])
+  @@index([role])
+  @@index([clientId])
+  @@map("users")
+}
+
+model MagicLinkToken {
+  id        String    @id @default(uuid())
+  email     String
+  token     String    @unique
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@index([token])
+  @@index([email])
+  @@map("magic_link_tokens")
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  clientId   String?
+  action     String
+  entityType String?
+  entityId   String?
+  details    Json?
+  ip         String?
+  isTest     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  client     Client?  @relation(fields: [clientId], references: [id])
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ── Serveis ───────────────────────────────────────────────────────────
+model Service {
+  id           String          @id @default(uuid())
+  name         String          @unique
+  slug         String          @unique
+  description  String?
+  category     ServiceCategory @default(PRODUCTE)
+  setupPrice   Decimal         @default(0) @db.Decimal(10, 2)
+  monthlyPrice Decimal         @default(0) @db.Decimal(10, 2)
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  planServices         PlanService[]
+  subscriptionServices SubscriptionService[]
+
+  @@index([slug])
+  @@index([category])
+  @@map("services")
+}
+
+enum ServiceCategory {
+  PRODUCTE
+  IA
+  AUTOMATITZACIONS
+  COMUNICACIO
+  INFORMES
+  SUPORT
+  OPERACIONAL
+}
+
+// ── Plans de servei ───────────────────────────────────────────────────
+model Plan {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  slug         String   @unique
+  priceMonthly Decimal  @db.Decimal(10, 2)
+  maxDomains   Int      @default(1)
+  maxUsers     Int      @default(1)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Límits d'ús
+  maxConversations Int?
+  maxTokens        Int?
+  maxAutomations   Int?
+  maxIntegrations  Int?
+  maxRagDocuments  Int?
+
+  // Funcionalitats
+  hasLandingPro   Boolean @default(false)
+  hasCustomDomain Boolean @default(false)
+  hasRag          Boolean @default(false)
+  hasTelegram     Boolean @default(false)
+
+  // Preus excedents
+  extraConversationPrice Decimal @default(0.005) @db.Decimal(10, 4)
+  extraTokenPrice        Decimal @default(0.0001) @db.Decimal(10, 6)
+
+  services      PlanService[]
+  subscriptions Subscription[]
+
+  @@index([slug])
+  @@map("plans")
+}
+
+// ── Plans ↔ Serveis ───────────────────────────────────────────────────
+model PlanService {
+  planId    String
+  serviceId String
+
+  plan    Plan    @relation(fields: [planId],    references: [id])
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@id([planId, serviceId])
+  @@map("plan_services")
+}
+
+// ── Clients (empreses) ─────────────────────────────────────────────────
+model Client {
+  id           String       @id @default(uuid())
+  companyName  String
+  contactName  String
+  contactEmail String       @unique
+  contactPhone String?
+  nif          String?
+  address      String?
+  domain       String?      @unique
+  logoUrl      String?
+  notes        String?
+  status       ClientStatus @default(ACTIVE)
+  billingType  BillingType  @default(MONTHLY)
+  language     String       @default("ca")
+  referralCode String?      @unique
+  referredById String?
+  isTest       Boolean      @default(false)
+  deletedAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  referredBy    Client?       @relation("Referrals", fields: [referredById], references: [id])
+  referrals     Client[]      @relation("Referrals")
+  users         User[]
+  subscriptions Subscription[]
+  auditLogs     AuditLog[]
+  usage         ClientUsage?
+  discounts     ClientDiscount[]
+  planHistory   PlanHistory[]
+  credentials   ClientCredential[]
+  oauthStates   OAuthState[]
+  invoices      Invoice[]
+  landing       ClientLanding?
+  automations   ClientAutomation[]
+  onboarding    OnboardingProgress?
+  consents      ConsentLog[]
+  dataExports   DataExportRequest[]
+  domains       ClientDomain[]
+  aiProviders   AIProvider[]
+  whatsappBot   WhatsAppBotConfig?
+  telegramBot   TelegramBotConfig?
+  ragDocuments  RAGDocument[]
+  tenantFlows    TenantFlow[]
+  tenantMetrics  TenantMetric[]
+  tenantHealth   TenantHealth?
+  budgets        Budget[]
+  serviceHistory ServiceHistory[]
+  billingHistory BillingHistory[]
+
+  @@index([contactEmail])
+  @@index([domain])
+  @@index([referralCode])
+  @@map("clients")
+}
+
+// ── Pressupostos i Ofertes ───────────────────────────────────────────
+
+model Budget {
+  id              String         @id @default(uuid())
+  clientId        String
+  title           String
+  description     String?
+  demoUrl         String?        // Link a la demo interactiva
+  status          BudgetStatus   @default(DRAFT)
+  totalSetup      Decimal        @default(0) @db.Decimal(10, 2)
+  totalMonthly    Decimal        @default(0) @db.Decimal(10, 2)
+  notes           String?        // Comentaris de la IA o de l'admin
+  expiresAt       DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  client          Client         @relation(fields: [clientId], references: [id])
+  phases          BudgetPhase[]
+
+  @@map("budgets")
+}
+
+model BudgetPhase {
+  id              String    @id @default(uuid())
+  budgetId        String
+  phaseId         String?   // Referència al template original si n'hi ha
+  name            String
+  description     String?
+  demoUrl         String?   // Link a la demo específica d'aquesta fase
+  orderIndex      Int
+  setupPrice      Decimal   @db.Decimal(10, 2)
+  monthlyPrice    Decimal   @db.Decimal(10, 2)
+  isRecommended   Boolean   @default(false)
+  status          BudgetPhaseStatus @default(PENDING)
+
+  budget          Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@map("budget_phases")
+}
+
+// ── Historial i Facturació ───────────────────────────────────────────
+
+model ServiceHistory {
+  id              String   @id @default(uuid())
+  clientId        String
+  phaseId         String
+  name            String
+  description     String?
+  monthlyPrice    Decimal  @db.Decimal(10, 2)
+  activatedAt     DateTime @default(now())
+  deliveredAt     DateTime?
+  
+  client          Client   @relation(fields: [clientId], references: [id])
+  
+  @@map("service_history")
+}
+
+model BillingHistory {
+  id              String   @id @default(uuid())
+  clientId        String
+  invoiceId       String?
+  amount          Decimal  @db.Decimal(10, 2)
+  description     String
+  type            BillingTypeLog
+  createdAt       DateTime @default(now())
+
+  client          Client   @relation(fields: [clientId], references: [id])
+  invoice         Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@map("billing_history")
+}
+
+enum BillingTypeLog {
+  SETUP
+  MONTHLY
+  UPGRADE
+}
+
+// ── Fluxos de Negoci ─────────────────────────────────────────────────
+
+model Flow {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  phases      Phase[]
+  tenantFlows TenantFlow[]
+
+  @@map("flows")
+}
+
+model Phase {
+  id           String   @id @default(uuid())
+  flowId       String
+  name         String
+  orderIndex   Int
+  baseHours    Decimal  @default(0) @db.Decimal(10, 2)
+  setupPrice   Decimal? @db.Decimal(10, 2)
+  monthlyPrice Decimal? @db.Decimal(10, 2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  flow         Flow               @relation(fields: [flowId], references: [id])
+  automations  Automation[]
+
+  @@map("phases")
+}
+
+model Automation {
+  id        String   @id @default(uuid())
+  phaseId   String
+  name      String
+  type      String   // ex: "whatsapp", "telegram", "calendar", "email"
+  config    Json     @default("{}")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  phase             Phase              @relation(fields: [phaseId], references: [id])
+
+  @@map("automations")
+}
+
+model TenantFlow {
+  id          String   @id @default(uuid())
+  tenantId    String
+  flowId      String?  // Opcional: referència al template original
+  name        String   // Nom personalitzat per al client
+  description String?
+  isActive    Boolean  @default(true)
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  client      Client        @relation(fields: [tenantId], references: [id])
+  flow        Flow?         @relation(fields: [flowId],   references: [id])
+  phases      TenantPhase[]
+
+  @@index([tenantId])
+  @@map("tenant_flows")
+}
+
+model TenantPhase {
+  id           String   @id @default(uuid())
+  tenantFlowId String
+  name         String
+  description  String?
+  orderIndex   Int
+  status       PhaseStatus @default(PENDING)
+  setupPrice   Decimal     @default(0) @db.Decimal(10, 2)
+  monthlyPrice Decimal     @default(0) @db.Decimal(10, 2)
+  setupPaid    Boolean     @default(false)
+  isDelivered  Boolean     @default(false)
+  deliveredAt  DateTime?
+  activatedAt  DateTime?
+  isActive     Boolean  @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenantFlow   TenantFlow         @relation(fields: [tenantFlowId], references: [id], onDelete: Cascade)
+  automations  TenantAutomation[]
+  upgrades     TenantUpgrade[]
+  deliveryLogs PhaseDeliveryLog[]
+
+  @@index([tenantFlowId])
+  @@map("tenant_phases")
+}
+
+model PhaseDeliveryLog {
+  id            String   @id @default(uuid())
+  tenantPhaseId String
+  action        String   // ex: "CREDENTIALS_REQUESTED", "AUTOMATION_TESTED", "CLIENT_APPROVED"
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  phase         TenantPhase @relation(fields: [tenantPhaseId], references: [id], onDelete: Cascade)
+
+  @@index([tenantPhaseId])
+  @@map("phase_delivery_logs")
+}
+
+model TenantAutomation {
+  id            String   @id @default(uuid())
+  tenantPhaseId String
+  name          String
+  type          String   // ex: "whatsapp", "telegram", "calendar", "email"
+  config        Json     @default("{}") // Configuració específica d'n8n/params per a aquest client
+  isActive      Boolean  @default(true)
+  deletedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenantPhase   TenantPhase @relation(fields: [tenantPhaseId], references: [id], onDelete: Cascade)
+
+  @@index([tenantPhaseId])
+  @@map("tenant_automations")
+}
+
+model TenantUpgrade {
+  id              String   @id @default(uuid())
+  tenantPhaseId   String
+  name            String
+  description     String?
+  type            UpgradeType @default(FEATURE)
+  setupPrice      Decimal     @default(0) @db.Decimal(10, 2)
+  monthlyIncrease Decimal     @default(0) @db.Decimal(10, 2)
+  status          UpgradeStatus @default(PENDING)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenantPhase     TenantPhase @relation(fields: [tenantPhaseId], references: [id], onDelete: Cascade)
+
+  @@index([tenantPhaseId])
+  @@map("tenant_upgrades")
+}
+
+model TenantMetric {
+  id           String   @id @default(uuid())
+  tenantId     String
+  date         DateTime @default(now())
+  leads        Int      @default(0)
+  responses    Int      @default(0)
+  bookings     Int      @default(0)
+  messagesSent Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  client Client @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, date])
+  @@map("tenant_metrics")
+}
+
+model TenantHealth {
+  id             String   @id @default(uuid())
+  tenantId       String   @unique
+  churnScore     Int      @default(0)
+  riskLevel      String   @default("low") // low, medium, high
+  lastCalculated DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  client Client @relation(fields: [tenantId], references: [id])
+
+  @@map("tenant_health")
+}
+
+// ── Subscripcions ─────────────────────────────────────────────────────
+model Subscription {
+  id                 String             @id @default(uuid())
+  clientId           String
+  planId             String?
+  status             SubscriptionStatus @default(ACTIVE)
+  startDate          DateTime           @default(now())
+  endDate            DateTime?
+  renewsAt           DateTime?
+  cancelledAt        DateTime?
+  isCustom     Boolean @default(false)
+  priceMonthly Decimal @default(0) @db.Decimal(10, 2)
+  priceSetup   Decimal @default(0) @db.Decimal(10, 2)
+  createdAt    DateTime @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  client   Client               @relation(fields: [clientId], references: [id])
+  plan     Plan?                @relation(fields: [planId],   references: [id])
+  services SubscriptionService[]
+
+  @@index([clientId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+// ── Subscripcions ↔ Serveis ───────────────────────────────────────────
+model SubscriptionService {
+  subscriptionId String
+  serviceId      String
+  // isExtra: true = afegit sobre el pla base; false = inclòs al pla
+  isExtra        Boolean   @default(false)
+  // active: el servei ha estat configurat i activat per l'administrador
+  active         Boolean   @default(false)
+  activatedAt    DateTime?
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+  service      Service      @relation(fields: [serviceId],      references: [id])
+
+  @@id([subscriptionId, serviceId])
+  @@map("subscription_services")
+}
+
+// ── Ús del client (reinicia cada mes) ────────────────────────────────
+model ClientUsage {
+  id                String   @id @default(uuid())
+  clientId          String   @unique
+  conversationsUsed Int      @default(0)
+  tokensUsed        Int      @default(0)
+  automationsUsed   Int      @default(0)
+  ragDocsUsed       Int      @default(0)
+  periodStart       DateTime @default(now())
+  periodEnd         DateTime
+  updatedAt         DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@map("client_usage")
+}
+
+// ── Historial de plans ────────────────────────────────────────────────
+model PlanHistory {
+  id        String   @id @default(uuid())
+  clientId  String
+  planId    String?
+  planName  String
+  price     Decimal  @db.Decimal(10, 2)
+  reason    String?
+  changedAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@map("plan_history")
+}
+
+// ── OAuth State (CSRF tokens per als fluxos d'autorització) ──────────
+model OAuthState {
+  id         String   @id @default(uuid())
+  state      String   @unique
+  clientId   String
+  provider   String   // ex: "whatsapp", "google"
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([state])
+  @@index([clientId])
+  @@map("oauth_states")
+}
+
+// ── Credencials de clients (encriptades AES-256-GCM) ─────────────────
+model ClientCredential {
+  id           String   @id @default(uuid())
+  clientId     String
+  provider     String   // ex: "whatsapp", "n8n", "openai"
+  key          String   // ex: "API_KEY", "PHONE_ID", "WEBHOOK_URL"
+  encryptedVal String
+  iv           String
+  tag          String
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@unique([clientId, provider, key])
+  @@index([clientId])
+  @@map("client_credentials")
+}
+
+// ── Polítiques de descompte ───────────────────────────────────────────
+model DiscountPolicy {
+  id             String       @id @default(uuid())
+  type           DiscountType @unique
+  isActive       Boolean      @default(true)
+  percentage     Decimal?     @db.Decimal(5, 2)
+  monthsFree     Int?
+  durationMonths Int?
+  description    String?
+  updatedBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("discount_policies")
+}
+
+// ── Descomptes aplicats a clients ─────────────────────────────────────
+model ClientDiscount {
+  id         String       @id @default(uuid())
+  clientId   String
+  type       DiscountType
+  percentage Decimal?     @db.Decimal(5, 2)
+  monthsFree Int?
+  appliedAt  DateTime     @default(now())
+  expiresAt  DateTime?
+  isActive   Boolean      @default(true)
+  reason     String?
+  appliedBy  String?
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@map("client_discounts")
+}
+
+// ── Factures ──────────────────────────────────────────────────────────
+model Invoice {
+  id          String        @id @default(uuid())
+  clientId    String
+  number      String        @unique  // ex: "2026-0001"
+  status      InvoiceStatus @default(PENDING)
+  issueDate   DateTime      @default(now())
+  dueDate     DateTime
+  subtotal    Decimal       @db.Decimal(10, 2)
+  discountAmt Decimal       @default(0) @db.Decimal(10, 2)
+  taxRate     Decimal       @default(21) @db.Decimal(5, 2)
+  taxAmt      Decimal       @db.Decimal(10, 2)
+  total       Decimal       @db.Decimal(10, 2)
+  notes       String?
+  paidAt      DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  client      Client        @relation(fields: [clientId], references: [id])
+  items       InvoiceItem[]
+  billingHistory BillingHistory[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([issueDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Int     @default(1)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  total       Decimal @db.Decimal(10, 2)
+
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+// ── Micro-Landing dels clients ────────────────────────────────────────
+model ClientLanding {
+  id           String   @id @default(uuid())
+  clientId     String   @unique
+  title        String
+  subtitle     String?
+  description  String?
+  ctaText      String   @default("Contacta'ns")
+  ctaUrl       String?
+  logoGcsPath  String?
+  logoUrl      String?  // URL pública (GCS o externa) o base64 data URL (MVP)
+  primaryColor String   @default("#FF6B00")
+  style        String   @default("dark-tech")
+  fontPair     String   @default("orbitron-rajdhani")
+  published    Boolean  @default(false)
+  publishedAt  DateTime?
+  slug         String   @unique  // ex: "empresa-amg" → /l/empresa-amg
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  client       Client   @relation(fields: [clientId], references: [id])
+  sections     ClientLandingSection[]
+
+  @@index([slug])
+  @@map("client_landings")
+}
+
+model ClientLandingSection {
+  id          String   @id @default(uuid())
+  landingId   String
+  kind        String
+  title       String?
+  config      Json     @default("{}")
+  orderIndex  Int
+
+  landing     ClientLanding @relation(fields: [landingId], references: [id], onDelete: Cascade)
+
+  @@index([landingId])
+  @@map("client_landing_sections")
+}
+
+// ── Política global de preus ──────────────────────────────────────────
+model PricingPolicy {
+  id                    String   @id @default(uuid())
+  minNoticeDays         Int      @default(30)
+  allowImmediateChange  Boolean  @default(false)
+  notifyClientsOnChange Boolean  @default(true)
+  updatedBy             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("pricing_policies")
+}
+
+// ── Onboarding ────────────────────────────────────────────────────────
+model OnboardingProgress {
+  id              String    @id @default(uuid())
+  clientId        String    @unique
+  currentStep     Int       @default(0) // Pas del 1 al 7
+  currentPhaseId  String?   // Fase que s'està configurant actualment
+  day0SentAt      DateTime?
+  day1SentAt  DateTime?
+  day7SentAt  DateTime?
+  day15SentAt DateTime?
+  day30SentAt DateTime?
+  hasAccessed Boolean   @default(false)
+  completedAt DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  client      Client    @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@map("onboarding_progress")
+}
+
+// ── Automatitzacions n8n ──────────────────────────────────────────────
+model AutomationTemplate {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  category     String   @default("general")
+  workflowJson   Json
+  requiredParams Json     @default("[]")
+  isActive       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  automations ClientAutomation[]
+
+  @@index([slug])
+  @@map("automation_templates")
+}
+
+model ClientAutomation {
+  id             String           @id @default(uuid())
+  clientId       String
+  templateId     String
+  name           String
+  n8nWorkflowId  String?
+  status         AutomationStatus @default(INACTIVE)
+  errorCount     Int              @default(0)
+  lastRunAt      DateTime?
+  lastError      String?
+  deletedAt      DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  client     Client             @relation(fields: [clientId],   references: [id])
+  template   AutomationTemplate @relation(fields: [templateId], references: [id])
+  executions AutomationExecution[]
+
+  @@index([clientId])
+  @@index([status])
+  @@map("client_automations")
+}
+
+model AutomationExecution {
+  id             String          @id @default(uuid())
+  automationId   String
+  n8nExecutionId String?
+  status         ExecutionStatus @default(RUNNING)
+  tokensUsed     Int             @default(0)
+  durationMs     Int?
+  error          String?
+  startedAt      DateTime        @default(now())
+  finishedAt     DateTime?
+
+  automation ClientAutomation @relation(fields: [automationId], references: [id])
+
+  @@index([automationId])
+  @@index([status])
+  @@map("automation_executions")
+}
+
+// ── RAG / Documents ───────────────────────────────────────────────────
+
+model RAGDocument {
+  id          String        @id @default(uuid())
+  clientId    String
+  filename    String
+  gcsPath     String
+  mimeType    String        @default("application/pdf")
+  sizeBytes   Int           @default(0)
+  status      RAGDocStatus  @default(PENDING)
+  chunkCount  Int           @default(0)
+  error       String?
+  indexedAt   DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([status])
+  @@map("rag_documents")
+}
+
+// ── Bot WhatsApp ──────────────────────────────────────────────────────
+
+model WhatsAppBotConfig {
+  id            String   @id @default(uuid())
+  clientId      String   @unique
+  botName       String   @default("AssistentAMG")
+  greeting      String   @db.Text
+  tone          String   @default("amable")
+  businessHours String?
+  faqs          Json     @default("[]")
+  isActive      Boolean  @default(false)
+  deletedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@map("whatsapp_bot_configs")
+}
+
+// ── Bot Telegram ──────────────────────────────────────────────────────
+
+model TelegramBotConfig {
+  id               String   @id @default(uuid())
+  clientId         String   @unique
+  botName          String   @default("AssistentAMG")
+  telegramBotToken String?
+  greeting         String   @db.Text
+  tone             String   @default("amable")
+  businessHours    String?
+  faqs             Json     @default("[]")
+  isActive         Boolean  @default(false)
+  deletedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@map("telegram_bot_configs")
+}
+
+// ── Proveïdors IA per client ──────────────────────────────────────────
+
+model AIProvider {
+  id           String          @id @default(uuid())
+  clientId     String
+  provider     AIProviderType
+  model        String
+  apiKeyEnc    String?
+  apiKeyIv     String?
+  apiKeyTag    String?
+  baseUrl      String?
+  isActive     Boolean         @default(true)
+  priority     Int             @default(0)
+  deletedAt    DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([provider])
+  @@map("ai_providers")
+}
+
+// ── Dominis personalitzats ────────────────────────────────────────────
+
+model ClientDomain {
+  id           String       @id @default(uuid())
+  clientId     String
+  domain       String       @unique
+  status       DomainStatus @default(PENDING)
+  dnsToken     String       @unique
+  verifiedAt   DateTime?
+  lastChecked  DateTime?
+  errorMessage String?
+  deletedAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([status])
+  @@map("client_domains")
+}
+
+// ── Notificacions per email ───────────────────────────────────────────
+model Notification {
+  id        String             @id @default(uuid())
+  type      NotificationEvent
+  recipient String
+  subject   String
+  status    NotificationStatus @default(PENDING)
+  attempts  Int                @default(0)
+  sentAt    DateTime?
+  error     String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@index([recipient])
+  @@index([type])
+  @@index([status])
+  @@map("notifications")
+}
+
+// ── RGPD ─────────────────────────────────────────────────────────────
+
+model ConsentLog {
+  id          String      @id @default(uuid())
+  clientId    String
+  type        ConsentType
+  granted     Boolean
+  ip          String?
+  userAgent   String?
+  grantedAt   DateTime    @default(now())
+  revokedAt   DateTime?
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([type])
+  @@map("consent_logs")
+}
+
+model DataExportRequest {
+  id          String            @id @default(uuid())
+  clientId    String
+  status      ExportStatus      @default(PENDING)
+  gcsPath     String?
+  requestedAt DateTime          @default(now())
+  completedAt DateTime?
+  error       String?
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@map("data_export_requests")
+}
+
+// ── Enums ─────────────────────────────────────────────────────────────
+enum Role {
+  ADMIN
+  CLIENT
+  VISITOR
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  TRIAL
+}
+
+enum ClientStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum BillingType {
+  MONTHLY
+  ANNUAL
+}
+
+enum DiscountType {
+  NEW_CLIENT
+  ANNUAL_PAYMENT
+  REFERRAL_REFERRER
+  REFERRAL_NEW
+  MANUAL
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum AutomationStatus {
+  INACTIVE
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+enum ExecutionStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum NotificationEvent {
+  WELCOME
+  INVOICE_GENERATED
+  PAYMENT_REMINDER_7
+  PAYMENT_REMINDER_30
+  USAGE_WARNING_80
+  USAGE_LIMIT_100
+  MAGIC_LINK
+  OAUTH_CONNECTED
+  PLAN_CHANGED
+  ONBOARDING_REMINDER
+}
+
+// ── Templates de Landing (Factory) ────────────────────────────────────
+model LandingTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  previewUrl  String?
+  config      Json     @default("{}") // Configuració global del template
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sections    LandingTemplateSection[]
+
+  @@index([slug])
+  @@map("landing_templates")
+}
+
+model LandingTemplateSection {
+  id          String   @id @default(uuid())
+  templateId  String
+  kind        String   // ex: "HERO", "FEATURES", "CTA", "TEXT"
+  title       String?
+  config      Json     @default("{}")
+  orderIndex  Int
+
+  template    LandingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@map("landing_template_sections")
+}
+
+// ── Configuració de Facturació externa (Holded, etc) ──────────────────
+model BillingProviderConfig {
+  id          String   @id @default(uuid())
+  clientId    String?  // Opcional: si és null és la global
+  provider    String   // ex: "holded"
+  apiKeyEnc   String
+  iv          String
+  tag         String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientId])
+  @@map("billing_provider_configs")
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum RAGDocStatus {
+  PENDING
+  INDEXING
+  INDEXED
+  FAILED
+}
+
+enum AIProviderType {
+  GROQ
+  OLLAMA
+  OPENAI
+  ANTHROPIC
+}
+
+enum DomainStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum ConsentType {
+  COOKIES_NECESSARY
+  COOKIES_ANALYTICS
+  COOKIES_MARKETING
+  DATA_PROCESSING
+  COMMUNICATIONS
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum PhaseStatus {
+  PENDING
+  PURCHASED
+  ACTIVE
+}
+
+enum UpgradeType {
+  ADJUSTMENT
+  FEATURE
+  REFACTOR
+}
+
+enum UpgradeStatus {
+  PENDING
+  ACCEPTED
+  ACTIVE
+  CANCELLED
+}
+
+enum BudgetStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  PARTIALLY_ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum BudgetPhaseStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
